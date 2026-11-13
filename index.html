@@ -1,0 +1,100 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Broadcast Console</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: white;
+            padding: 30px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: auto;
+        }
+
+        .status-on {
+            color: #00cc66;
+        }
+
+        .status-off {
+            color: red;
+        }
+
+        input {
+            padding: 8px;
+            width: 250px;
+        }
+
+        button {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        pre {
+            background: black;
+            color: #00ff66;
+            padding: 15px;
+            height: 250px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Broadcast Console</h1>
+    <p id="status" class="status-off">Connecting...</p>
+
+    <form id="message-form">
+        <input id="message-input" type="text" placeholder="Send cargo..." required />
+        <button type="submit">Deploy Message</button>
+    </form>
+
+    <h3>Live Stream Logs:</h3>
+    <pre id="log"></pre>
+</body>
+<script>
+        const statusEl = document.getElementById("status");
+        const log = document.getElementById("log");
+        const input = document.getElementById("message-input");
+        const sendButton = document.getElementById("send-button");
+
+        // 1. Initiate the Handshake
+        const socket = new WebSocket('ws://localhost:8080');
+
+        // Append messages to the log
+        const appendLog = (label, message) => {
+        const entry = `${new Date().toLocaleTimeString()} [${label}] ${message}\n`;
+        log.textContent = entry + log.textContent;
+        log.scrollTop = log.scrollHeight;
+        };
+
+        // 2. Connection Established
+        socket.addEventListener('open', () => {
+            statusEl.textContent =
+                'CONNECTED: ws://localhost:8080';
+
+            statusEl.className = 'status-on';
+            appendLog('[SYSTEM]', 'WebSocket connection established.');
+        });
+
+        // 3. Connection Closed
+        socket.addEventListener('close', () => {
+            statusEl.textContent = 'DISCONNECTED';
+            statusEl.className = 'status-off';
+            appendLog('[SYSTEM]', 'WebSocket connection closed.');
+        });
+
+        socket.addEventListener('message', (event) => {
+            appendLog('[RECEIVED]', event.data);
+        });
+
+       
+    </script>
+</html>

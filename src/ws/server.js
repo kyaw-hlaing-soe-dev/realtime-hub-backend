@@ -1,4 +1,4 @@
-import WebSocket from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { wsArcjet } from "../arcjet.js";
 
 function sendJson(socket, payload) {
@@ -36,7 +36,7 @@ function rejectUpgrade(socket, statusCode, statusText, message, retryAfter) {
 }
 
 export function attachWebSocketServer(server) {
-  const wss = new WebSocket.Server({
+  const wss = new WebSocketServer({
     noServer: true,
     maxPayload: 1024 * 1024,
   });

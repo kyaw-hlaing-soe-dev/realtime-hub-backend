@@ -18,10 +18,26 @@ function broadcast(wss, payload) {
   }
 }
 
+function rejectUpgrade(socket, statusCode, statusText, message, retryAfter) {
+  const body = JSON.stringify({ error: message });
+  const headers = [
+    `HTTP/1.1 ${statusCode} ${statusText}`,
+    "Connection: close",
+    "Content-Type: application/json",
+    `Content-Length: ${Buffer.byteLength(body)}`,
+  ];
+
+  if (retryAfter) {
+    headers.push(`Retry-After: ${retryAfter}`);
+  }
+
+  socket.write(`${headers.join("\r\n")}\r\n\r\n${body}`);
+  socket.destroy();
+}
+
 export function attachWebSocketServer(server) {
   const wss = new WebSocket.Server({
-    server,
-    path: "/ws",
+    noServer: true,
     maxPayload: 1024 * 1024,
   });
   const heartbeatInterval = setInterval(() => {
@@ -42,14 +58,21 @@ export function attachWebSocketServer(server) {
     broadcast(wss, { type: "matchCreated", data: match });
   }
 
-  wss.on("connection", async (socket, request) => {
+  async function handleUpgrade(request, socket, head) {
+    const requestUrl = new URL(request.url, "http://localhost");
+
+    if (requestUrl.pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+
     socket.on("error", (error) => {
       console.error("WebSocket error:", error);
     });
 
     if (!wsArcjet) {
       console.error("WebSocket security is not configured");
-      socket.close(1011, "WebSocket security unavailable");
+      rejectUpgrade(socket, 503, "Service Unavailable", "WebSocket security unavailable");
       return;
     }
 
@@ -57,26 +80,37 @@ export function attachWebSocketServer(server) {
       const decision = await wsArcjet.protect(request);
 
       if (decision.isDenied()) {
-        const message = decision.reason.isRateLimit()
+        const isRateLimited = decision.reason.isRateLimit();
+        const statusCode = isRateLimited ? 429 : 403;
+        const statusText = isRateLimited ? "Too Many Requests" : "Forbidden";
+        const message = isRateLimited
           ? "Too many connections"
           : "Connection not allowed";
 
         console.warn("WebSocket connection denied:", message);
-        socket.close(1008, message);
+        rejectUpgrade(socket, statusCode, statusText, message, isRateLimited ? 2 : undefined);
         return;
       }
 
       if (decision.isErrored()) {
         console.error("WebSocket Arcjet decision error:", decision.reason.message);
-        socket.close(1011, "WebSocket security unavailable");
+        rejectUpgrade(socket, 503, "Service Unavailable", "WebSocket security unavailable");
         return;
       }
+
+      wss.handleUpgrade(request, socket, head, (client) => {
+        wss.emit("connection", client, request);
+      });
     } catch (error) {
       console.error("WebSocket Arcjet error:", error);
-      socket.close(1011, "WebSocket security unavailable");
+      rejectUpgrade(socket, 503, "Service Unavailable", "WebSocket security unavailable");
       return;
     }
+  }
 
+  server.on("upgrade", handleUpgrade);
+
+  wss.on("connection", (socket) => {
     socket.isAlive = true;
     socket.on("pong", () => {
       socket.isAlive = true;
@@ -87,6 +121,7 @@ export function attachWebSocketServer(server) {
 
   wss.on("close", () => {
     clearInterval(heartbeatInterval);
+    server.off("upgrade", handleUpgrade);
   });
 
   return { broadcastMatchCreate };

@@ -29,7 +29,7 @@ export const wsArcjet = arcjet({
       mode: arcjetMode,
       allow: ["CATEGORY:SEARCH_ENGINE", "CATEGORY:PREVIEW"],
     }),
-    slidingWindow({ mode: arcjetMode, interval: "10s", max: 50 }),
+    slidingWindow({ mode: arcjetMode, interval: "2s", max: 5 }),
   ],
 });
 

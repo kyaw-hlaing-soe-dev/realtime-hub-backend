@@ -1,89 +1,194 @@
 # Realtime Hub Backend
 
-A small Node.js project for learning WebSockets and building real-time
-applications. The project uses the [`ws`](https://github.com/websockets/ws)
-library to run a WebSocket server and will grow into a real-time communication
-backend.
+A hands-on WebSocket learning project built with Node.js. The project uses a
+sports match API as a practical example for learning how to connect clients,
+send events, broadcast updates, and build real-time backend features.
 
-## What this project covers
+## Features
 
-- Starting a WebSocket server with Node.js
-- Accepting client connections
-- Sending and receiving real-time messages
-- Broadcasting events to connected clients
-- Managing connection and disconnection events
-- Building the foundation for a real-time application
+- Express HTTP API
+- PostgreSQL access through Drizzle ORM
+- Zod request validation
+- Match status calculation: `scheduled`, `live`, and `finished`
+- WebSocket welcome and match-created events
 
-## Current status
+## Learning goals
 
-The WebSocket server currently listens on port `8080` and accepts connections.
-Message handling and broadcasting will be implemented as part of the learning
-process.
+This project is intentionally being developed step by step to practice:
+
+- Creating and managing WebSocket connections
+- Sending structured JSON messages
+- Broadcasting events to multiple clients
+- Connecting HTTP API actions to WebSocket notifications
+- Handling connection errors and disconnected clients
+- Building real-time features around a simple domain model
 
 ## Requirements
 
 - Node.js 18 or newer
 - npm
+- PostgreSQL
 
-## Getting started
+## Setup
 
-Install the dependencies:
+Install dependencies:
 
 ```bash
 npm install
 ```
 
+Create a `.env` file with the database connection string:
+
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/realtime_hub
+DATABASE_URL_UNPOOLED=postgresql://user:password@localhost:5432/realtime_hub
+PORT=8000
+HOST=0.0.0.0
+```
+
+`DATABASE_URL` is used by the application. `DATABASE_URL_UNPOOLED` is used by
+Drizzle Kit for migrations.
+
+Generate and run database migrations:
+
+```bash
+npm run db:generate
+npm run db:migrate
+```
+
 Start the server:
 
 ```bash
-node server.js
+npm start
 ```
 
-The server will be available at:
+The default endpoints are:
 
 ```text
-ws://localhost:8080
+HTTP:      http://localhost:8000
+WebSocket: ws://localhost:8000/ws
 ```
 
-## Connecting from a browser
+Use `npm run dev` to start the server with Node.js watch mode.
 
-Open the browser developer console and run:
+## Matches API
+
+### List matches
+
+```http
+GET /matches
+```
+
+An optional `limit` query parameter can be used. It must be a positive integer
+between 1 and 100. The default is 20.
+
+```bash
+curl "http://localhost:8000/matches?limit=10"
+```
+
+### Create a match
+
+```http
+POST /matches
+Content-Type: application/json
+```
+
+Request body:
+
+```json
+{
+  "sport": "football",
+  "homeTeam": "Manchester United",
+  "awayTeam": "Liverpool",
+  "startTime": "2026-11-18T14:00:00.000Z",
+  "endTime": "2026-11-18T16:00:00.000Z"
+}
+```
+
+`homeScore` and `awayScore` are optional and default to `0`. `endTime` must be
+later than `startTime`, and both values must be valid date strings.
+
+```bash
+curl -X POST http://localhost:8000/matches \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sport": "football",
+    "homeTeam": "Manchester United",
+    "awayTeam": "Liverpool",
+    "startTime": "2026-11-18T14:00:00.000Z",
+    "endTime": "2026-11-18T16:00:00.000Z"
+  }'
+```
+
+Invalid request data returns `400`. Database failures return `500`.
+
+## WebSocket API
+
+Connect to:
 
 ```js
-const socket = new WebSocket("ws://localhost:8080");
-
-socket.onopen = () => {
-  console.log("Connected to the real-time server");
-};
+const socket = new WebSocket("ws://localhost:8000/ws");
 
 socket.onmessage = (event) => {
-  console.log("Message from server:", event.data);
-};
-
-socket.onclose = () => {
-  console.log("Disconnected from the real-time server");
+  console.log(JSON.parse(event.data));
 };
 ```
 
-## Project structure
+Each client receives a welcome message:
 
-```text
-.
-├── server.js       # WebSocket server
-├── package.json     # Project metadata and dependencies
-├── package-lock.json
-└── README.md       # Project documentation
+```json
+{
+  "type": "welcome",
+  "message": "Connected to WebSocket server"
+}
+```
+
+After a match is created successfully, connected clients receive:
+
+```json
+{
+  "type": "matchCreated",
+  "data": {
+    "id": 1,
+    "sport": "football",
+    "homeTeam": "Manchester United",
+    "awayTeam": "Liverpool",
+    "status": "scheduled",
+    "homeScore": 0,
+    "awayScore": 0
+  }
+}
+```
+
+## Testing
+
+Run the validation tests:
+
+```bash
+npm test
 ```
 
 ## Learning roadmap
 
-1. Handle incoming client messages.
-2. Broadcast messages to all connected clients.
-3. Add usernames or client identities.
-4. Create rooms or channels.
-5. Add basic validation and error handling.
-6. Connect the backend to a real-time frontend.
+Planned exercises include:
 
-## License
+1. Add client message handling.
+2. Broadcast score and match-status updates.
+3. Add client identity and presence.
+4. Create rooms or match-specific channels.
+5. Add reconnection and heartbeat handling.
+6. Connect a real-time frontend client.
 
-This project is for learning and experimentation.
+## Project structure
+
+```text
+src/
+├── db/              # Drizzle database client and schema
+├── routes/          # Express routes
+├── utils/           # Match status utilities
+├── validation/      # Zod schemas
+├── ws/              # WebSocket server
+└── index.js         # HTTP and WebSocket application entry point
+test/                # Node.js tests
+drizzle/             # Database migrations
+```

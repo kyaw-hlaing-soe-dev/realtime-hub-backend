@@ -12,7 +12,7 @@ import {
 const router = Router();
 
 const sendValidationError = (res, error) => {
-  return res.status(400).json({ error: error.flatten() });
+  return res.status(400).json({ error: error.issues });
 };
 
 const sendServerError = (res, operation, error) => {

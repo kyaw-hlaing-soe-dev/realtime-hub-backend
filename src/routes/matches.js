@@ -80,6 +80,8 @@ router.post("/", async (req, res) => {
       })
       .returning();
 
+    req.app.locals.broadcastMatchCreate(match);
+
     return res.status(201).json(match);
   } catch (error) {
     return sendServerError(res, "create", error);

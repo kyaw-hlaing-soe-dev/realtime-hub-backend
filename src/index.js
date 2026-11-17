@@ -2,8 +2,7 @@ import express from "express";
 import http from "http";
 import matchesRouter from "./routes/matches.js";
 import { attachWebSocketServer } from "./ws/server.js";
-import { wsArcjet } from "../arcjet.js";
-import securityMiddleware from "./arcjet.js";
+import { securityMiddleware } from "./arcjet.js";
 
 const PORT = Number(process.env.PORT) || 8000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -11,9 +10,8 @@ const HOST = process.env.HOST || "0.0.0.0";
 const app = express();
 const server = http.createServer(app);
 
-
 app.use(express.json());
-app.use(securityMiddleware());
+app.use(securityMiddleware);
 app.use("/matches", matchesRouter);
 
 const { broadcastMatchCreate } = attachWebSocketServer(server);

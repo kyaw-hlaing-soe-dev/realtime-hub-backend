@@ -3,17 +3,29 @@ import { desc, eq } from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import { matches } from "../db/schema.js";
+import { getMatchStatus, syncMatchStatus } from "../utils/matche-status.js";
 import {
   createMatchSchema,
   listMatchesQuerySchema,
-  matchIdParamSchema,
-  updateScoreSchema,
 } from "../validation/matches.js";
 
 const router = Router();
 
 const sendValidationError = (res, error) => {
-  res.status(400).json({ error: error.flatten() });
+  return res.status(400).json({ error: error.flatten() });
+};
+
+const sendServerError = (res, operation, error) => {
+  console.error(`[matches] ${operation} failed`, error);
+  return res.status(500).json({ error: `Failed to ${operation} matches` });
+};
+
+const refreshMatchStatus = async (match) => {
+  await syncMatchStatus(match, async (status) => {
+    await db.update(matches).set({ status }).where(eq(matches.id, match.id));
+  });
+
+  return match;
 };
 
 router.get("/", async (req, res) => {
@@ -24,29 +36,18 @@ router.get("/", async (req, res) => {
   }
 
   const limit = parsedQuery.data.limit ?? 20;
-  const result = await db.select().from(matches).orderBy(desc(matches.startTime)).limit(limit);
 
-  return res.json(result);
-});
+  try {
+    const matchesList = await db
+      .select()
+      .from(matches)
+      .orderBy(desc(matches.createdAt))
+      .limit(limit);
 
-router.get("/:id", async (req, res) => {
-  const parsedParams = matchIdParamSchema.safeParse(req.params);
-
-  if (!parsedParams.success) {
-    return sendValidationError(res, parsedParams.error);
+    return res.json(await Promise.all(matchesList.map(refreshMatchStatus)));
+  } catch (error) {
+    return sendServerError(res, "load", error);
   }
-
-  const [match] = await db
-    .select()
-    .from(matches)
-    .where(eq(matches.id, parsedParams.data.id))
-    .limit(1);
-
-  if (!match) {
-    return res.status(404).json({ error: "Match not found" });
-  }
-
-  return res.json(match);
 });
 
 router.post("/", async (req, res) => {
@@ -56,43 +57,33 @@ router.post("/", async (req, res) => {
     return sendValidationError(res, parsedBody.error);
   }
 
-  const [match] = await db
-    .insert(matches)
-    .values({
-      ...parsedBody.data,
-      startTime: new Date(parsedBody.data.startTime),
-      endTime: new Date(parsedBody.data.endTime),
-      status: "scheduled",
-    })
-    .returning();
+  const startTime = new Date(parsedBody.data.startTime);
+  const endTime = new Date(parsedBody.data.endTime);
+  const status = getMatchStatus(startTime, endTime);
 
-  return res.status(201).json(match);
-});
-
-router.patch("/:id/score", async (req, res) => {
-  const parsedParams = matchIdParamSchema.safeParse(req.params);
-
-  if (!parsedParams.success) {
-    return sendValidationError(res, parsedParams.error);
+  if (!status) {
+    return res.status(400).json({ error: "Invalid match dates" });
   }
 
-  const parsedBody = updateScoreSchema.safeParse(req.body);
+  try {
+    const [match] = await db
+      .insert(matches)
+      .values({
+        sport: parsedBody.data.sport,
+        homeTeam: parsedBody.data.homeTeam,
+        awayTeam: parsedBody.data.awayTeam,
+        startTime,
+        endTime,
+        homeScore: parsedBody.data.homeScore ?? 0,
+        awayScore: parsedBody.data.awayScore ?? 0,
+        status,
+      })
+      .returning();
 
-  if (!parsedBody.success) {
-    return sendValidationError(res, parsedBody.error);
+    return res.status(201).json(match);
+  } catch (error) {
+    return sendServerError(res, "create", error);
   }
-
-  const [match] = await db
-    .update(matches)
-    .set(parsedBody.data)
-    .where(eq(matches.id, parsedParams.data.id))
-    .returning();
-
-  if (!match) {
-    return res.status(404).json({ error: "Match not found" });
-  }
-
-  return res.json(match);
 });
 
 export default router;

@@ -70,6 +70,8 @@ router.post("/", async (req, res) => {
       })
       .returning();
 
+    req.app.locals.broadcastCommentary(parsedParams.data.id, entry);
+
     return res.status(201).json(entry);
   } catch (error) {
     console.error("[commentary] create failed", error);

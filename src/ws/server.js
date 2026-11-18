@@ -18,6 +18,11 @@ function broadcast(wss, payload) {
   }
 }
 
+function parseMatchId(matchId) {
+  const id = Number(matchId);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 function rejectUpgrade(socket, statusCode, statusText, message, retryAfter) {
   const body = JSON.stringify({ error: message });
   const headers = [
@@ -40,6 +45,74 @@ export function attachWebSocketServer(server) {
     noServer: true,
     maxPayload: 1024 * 1024,
   });
+  const matchSubscribers = new Map();
+
+  function subscribe(matchId, socket) {
+    if (!matchSubscribers.has(matchId)) {
+      matchSubscribers.set(matchId, new Set());
+    }
+
+    matchSubscribers.get(matchId).add(socket);
+  }
+
+  function unsubscribe(matchId, socket) {
+    const subscribers = matchSubscribers.get(matchId);
+    if (!subscribers) return;
+
+    subscribers.delete(socket);
+    if (subscribers.size === 0) {
+      matchSubscribers.delete(matchId);
+    }
+  }
+
+  function cleanupSubscriptions(socket) {
+    for (const matchId of socket.subscriptions) {
+      unsubscribe(matchId, socket);
+    }
+  }
+
+  function broadcastToMatch(matchId, payload) {
+    const subscribers = matchSubscribers.get(matchId);
+    if (!subscribers) return;
+
+    for (const socket of subscribers) {
+      sendJson(socket, payload);
+    }
+  }
+
+  function handleMessage(socket, rawMessage) {
+    let message;
+
+    try {
+      message = JSON.parse(rawMessage.toString());
+    } catch {
+      sendJson(socket, { type: "error", message: "Invalid JSON message" });
+      return;
+    }
+
+    const matchId = parseMatchId(message.matchId);
+    if (!matchId) {
+      sendJson(socket, { type: "error", message: "Invalid matchId" });
+      return;
+    }
+
+    if (message.type === "subscribe") {
+      subscribe(matchId, socket);
+      socket.subscriptions.add(matchId);
+      sendJson(socket, { type: "subscribed", matchId });
+      return;
+    }
+
+    if (message.type === "unsubscribe") {
+      unsubscribe(matchId, socket);
+      socket.subscriptions.delete(matchId);
+      sendJson(socket, { type: "unsubscribed", matchId });
+      return;
+    }
+
+    sendJson(socket, { type: "error", message: "Unknown message type" });
+  }
+
   const heartbeatInterval = setInterval(() => {
     for (const socket of wss.clients) {
       if (socket.isAlive === false) {
@@ -56,6 +129,10 @@ export function attachWebSocketServer(server) {
 
   function broadcastMatchCreate(match) {
     broadcast(wss, { type: "matchCreated", data: match });
+  }
+
+  function broadcastCommentary(matchId, commentary) {
+    broadcastToMatch(matchId, { type: "commentary", data: commentary });
   }
 
   async function handleUpgrade(request, socket, head) {
@@ -112,8 +189,18 @@ export function attachWebSocketServer(server) {
 
   wss.on("connection", (socket) => {
     socket.isAlive = true;
+    socket.subscriptions = new Set();
+
     socket.on("pong", () => {
       socket.isAlive = true;
+    });
+
+    socket.on("message", (rawMessage) => {
+      handleMessage(socket, rawMessage);
+    });
+
+    socket.on("close", () => {
+      cleanupSubscriptions(socket);
     });
 
     sendJson(socket, { type: "welcome", message: "Connected to WebSocket server" });
@@ -124,6 +211,6 @@ export function attachWebSocketServer(server) {
     server.off("upgrade", handleUpgrade);
   });
 
-  return { broadcastMatchCreate };
+  return { broadcastMatchCreate, broadcastCommentary };
 }
     

@@ -1,12 +1,14 @@
-import apminsight from "apminsight";
-apminsight.config();
-
 import express from "express";
 import http from "http";
 import matchesRouter from "./routes/matches.js";
 import commentaryRouter from "./routes/commentary.js";
 import { attachWebSocketServer } from "./ws/server.js";
 import { securityMiddleware } from "./arcjet.js";
+
+if (!process.env.VERCEL) {
+  const { default: apminsight } = await import("apminsight");
+  apminsight.config();
+}
 
 const PORT = Number(process.env.PORT) || 8000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -22,8 +24,14 @@ app.get("/", (_req, res) => {
 app.use("/matches", matchesRouter);
 app.use("/matches/:id/commentary", commentaryRouter);
 
-const { broadcastMatchCreate, broadcastCommentary } =
-  attachWebSocketServer(server);
+let broadcastMatchCreate = () => {};
+let broadcastCommentary = () => {};
+
+if (!process.env.VERCEL) {
+  ({ broadcastMatchCreate, broadcastCommentary } =
+    attachWebSocketServer(server));
+}
+
 app.locals.broadcastMatchCreate = broadcastMatchCreate;
 app.locals.broadcastCommentary = broadcastCommentary;
 

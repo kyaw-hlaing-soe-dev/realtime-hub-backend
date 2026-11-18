@@ -71,6 +71,13 @@ WebSocket: ws://localhost:8000/ws
 
 Use `npm run dev` to start the server with Node.js watch mode.
 
+## Vercel deployment
+
+The HTTP API can be deployed to Vercel. Configure `DATABASE_URL` and
+`ARCJET_KEY` as Vercel environment variables before deploying. Vercel runs the
+HTTP API as a serverless function; WebSocket connections require a long-running
+Node.js host and are available when running the project locally.
+
 ## Matches API
 
 ### List matches

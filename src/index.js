@@ -16,6 +16,9 @@ const server = http.createServer(app);
 
 app.use(express.json());
 app.use(securityMiddleware);
+app.get("/", (_req, res) => {
+  res.json({ status: "ok" });
+});
 app.use("/matches", matchesRouter);
 app.use("/matches/:id/commentary", commentaryRouter);
 
@@ -24,9 +27,13 @@ const { broadcastMatchCreate, broadcastCommentary } =
 app.locals.broadcastMatchCreate = broadcastMatchCreate;
 app.locals.broadcastCommentary = broadcastCommentary;
 
-server.listen(PORT, HOST, () => {
-  const baseUrl =
-    HOST === "0.0.0.0" ? `http://localhost:${PORT}` : `http://${HOST}:${PORT}`;
-  console.log(`Server is running on port ${baseUrl}`);
-  console.log(`WebSocket server is running on ${baseUrl.replace("http", "ws")}/ws`);
-});
+if (!process.env.VERCEL) {
+  server.listen(PORT, HOST, () => {
+    const baseUrl =
+      HOST === "0.0.0.0" ? `http://localhost:${PORT}` : `http://${HOST}:${PORT}`;
+    console.log(`Server is running on port ${baseUrl}`);
+    console.log(`WebSocket server is running on ${baseUrl.replace("http", "ws")}/ws`);
+  });
+}
+
+export default app;

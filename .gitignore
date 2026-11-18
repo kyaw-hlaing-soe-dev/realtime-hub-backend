@@ -5,7 +5,7 @@ node_modules/
 .agents/
 .claude/
 skills-lock.json
-apminsight.json
+apminsightnode.json
 
 # Environment variables
 .env

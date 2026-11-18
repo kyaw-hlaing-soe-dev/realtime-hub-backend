@@ -1,3 +1,6 @@
+import apminsight from "apminsight";
+apminsight.config();
+
 import express from "express";
 import http from "http";
 import matchesRouter from "./routes/matches.js";

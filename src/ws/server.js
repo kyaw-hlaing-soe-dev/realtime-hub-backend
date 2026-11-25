@@ -1,5 +1,6 @@
 import { WebSocket, WebSocketServer } from "ws";
 import { wsArcjet } from "../arcjet.js";
+import { FOOTBALL_LEAGUE_ID } from "../config/football.js";
 
 function sendJson(socket, payload) {
   if (socket.readyState !== WebSocket.OPEN) return;
@@ -46,6 +47,8 @@ export function attachWebSocketServer(server) {
     maxPayload: 1024 * 1024,
   });
   const matchSubscribers = new Map();
+  const fixtureSnapshots = new Map();
+  const fixtureLeague = FOOTBALL_LEAGUE_ID;
 
   function subscribe(matchId, socket) {
     if (!matchSubscribers.has(matchId)) {
@@ -87,6 +90,34 @@ export function attachWebSocketServer(server) {
       message = JSON.parse(rawMessage.toString());
     } catch {
       sendJson(socket, { type: "error", message: "Invalid JSON message" });
+      return;
+    }
+
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      sendJson(socket, { type: "error", message: "Message must be a JSON object" });
+      return;
+    }
+
+    if (message.type === "subscribeFixtures") {
+      const league = Number(message.league ?? fixtureLeague);
+      if (!Number.isInteger(league) || league !== fixtureLeague) {
+        sendJson(socket, {
+          type: "error",
+          message: `Fixture feed is configured for league ${fixtureLeague}`,
+        });
+        return;
+      }
+      socket.fixtureSubscriptions.add(league);
+      sendJson(socket, { type: "subscribedFixtures", league });
+      const snapshot = fixtureSnapshots.get(league);
+      if (snapshot) sendJson(socket, { type: "fixturesSnapshot", data: snapshot });
+      return;
+    }
+
+    if (message.type === "unsubscribeFixtures") {
+      const league = Number(message.league ?? fixtureLeague);
+      socket.fixtureSubscriptions.delete(league);
+      sendJson(socket, { type: "unsubscribedFixtures", league });
       return;
     }
 
@@ -133,6 +164,19 @@ export function attachWebSocketServer(server) {
 
   function broadcastCommentary(matchId, commentary) {
     broadcastToMatch(matchId, { type: "commentary", data: commentary });
+  }
+
+  function broadcastFixtures(snapshot) {
+    const isFirstSnapshot = !fixtureSnapshots.has(snapshot.league);
+    fixtureSnapshots.set(snapshot.league, snapshot);
+    for (const client of wss.clients) {
+      if (client.fixtureSubscriptions.has(snapshot.league)) {
+        sendJson(client, {
+          type: isFirstSnapshot ? "fixturesSnapshot" : "fixturesUpdated",
+          data: snapshot,
+        });
+      }
+    }
   }
 
   async function handleUpgrade(request, socket, head) {
@@ -186,6 +230,7 @@ export function attachWebSocketServer(server) {
   wss.on("connection", (socket) => {
     socket.isAlive = true;
     socket.subscriptions = new Set();
+    socket.fixtureSubscriptions = new Set();
 
     socket.on("pong", () => {
       socket.isAlive = true;
@@ -207,6 +252,5 @@ export function attachWebSocketServer(server) {
     server.off("upgrade", handleUpgrade);
   });
 
-  return { broadcastMatchCreate, broadcastCommentary };
+  return { broadcastMatchCreate, broadcastCommentary, broadcastFixtures };
 }
-    

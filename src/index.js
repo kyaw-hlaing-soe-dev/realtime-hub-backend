@@ -6,7 +6,7 @@ import commentaryRouter from "./routes/commentary.js";
 import footballRouter from "./routes/football.js";
 import { attachWebSocketServer } from "./ws/server.js";
 import { securityMiddleware } from "./arcjet.js";
-import { createFootballSyncService } from "./services/footballSync.js";
+import { createFootballFeed } from "./services/footballFeed.js";
 
 if (!process.env.VERCEL) {
   const { default: apminsight } = await import("apminsight");
@@ -28,38 +28,28 @@ app.get("/", (_req, res) => {
 
 app.use("/matches", matchesRouter);
 app.use("/matches/:id/commentary", commentaryRouter);
-app.use("/football", footballRouter);   // ← new: direct API proxy routes
+app.use("/football", footballRouter);
 
 let broadcastMatchCreate = () => {};
 let broadcastCommentary = () => {};
+let broadcastFixtures = () => {};
 
 if (!process.env.VERCEL) {
-  ({ broadcastMatchCreate, broadcastCommentary } =
+  ({ broadcastMatchCreate, broadcastCommentary, broadcastFixtures } =
     attachWebSocketServer(server));
 }
 
 app.locals.broadcastMatchCreate = broadcastMatchCreate;
 app.locals.broadcastCommentary = broadcastCommentary;
 
-// ─── Football API sync ──────────────────────────────────────────────────────
-// Only run the poller when FOOTBALL_API_KEY is set and not on Vercel
-// (Vercel is serverless — use a separate cron worker there).
-if (!process.env.VERCEL && process.env.FOOTBALL_API_KEY) {
-  const sync = createFootballSyncService({
-    broadcastMatchCreate,
-    broadcastCommentary,
-  });
+// ─── OpenFootball WebSocket feed ─────────────────────────────────────────────
+if (!process.env.VERCEL) {
+  const feed = createFootballFeed({ publishFixtures: broadcastFixtures });
 
-  sync.start();
+  feed.start();
 
-  // Graceful shutdown
-  process.on("SIGTERM", () => sync.stop());
-  process.on("SIGINT", () => sync.stop());
-} else if (!process.env.FOOTBALL_API_KEY) {
-  console.warn(
-    "[boot] FOOTBALL_API_KEY not set — football sync disabled. " +
-      "Add it to .env to enable automatic match syncing."
-  );
+  process.on("SIGTERM", () => feed.stop());
+  process.on("SIGINT", () => feed.stop());
 }
 
 if (!process.env.VERCEL) {

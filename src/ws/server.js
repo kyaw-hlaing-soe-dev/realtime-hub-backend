@@ -170,19 +170,15 @@ export function attachWebSocketServer(server) {
       }
 
       if (decision.isErrored()) {
-        console.error("WebSocket Arcjet decision error:", decision.reason.message);
-        rejectUpgrade(socket, 503, "Service Unavailable", "WebSocket security unavailable");
-        return;
+        console.warn("WebSocket Arcjet decision error (allowing upgrade):", decision.reason.message);
       }
-
-      wss.handleUpgrade(request, socket, head, (client) => {
-        wss.emit("connection", client, request);
-      });
     } catch (error) {
-      console.error("WebSocket Arcjet error:", error);
-      rejectUpgrade(socket, 503, "Service Unavailable", "WebSocket security unavailable");
-      return;
+      console.warn("WebSocket Arcjet error (allowing upgrade):", error);
     }
+
+    wss.handleUpgrade(request, socket, head, (client) => {
+      wss.emit("connection", client, request);
+    });
   }
 
   server.on("upgrade", handleUpgrade);

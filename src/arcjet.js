@@ -2,8 +2,15 @@ import "dotenv/config";
 import arcjet, { detectBot, shield, slidingWindow } from "@arcjet/node";
 
 const arcjetKey = process.env.ARCJET_KEY;
+const isDev =
+  process.env.ARCJET_ENV === "development" ||
+  process.env.NODE_ENV === "development";
 const arcjetMode =
-  process.env.ARCJET_MODE === "DRY_RUN" ? "DRY_RUN" : "LIVE";
+  process.env.ARCJET_MODE === "LIVE" || process.env.ARCJET_MODE === "DRY_RUN"
+    ? process.env.ARCJET_MODE
+    : isDev
+      ? "DRY_RUN"
+      : "LIVE";
 
 if (!arcjetKey) {
   throw new Error("ARCJET_KEY environment variable is missing.");
@@ -56,13 +63,13 @@ export async function securityMiddleware(req, res, next) {
     }
 
     if (decision.isErrored()) {
-      console.error("Arcjet decision error:", decision.reason.message);
-      return res.status(503).json({ error: "Security service unavailable" });
+      console.warn("Arcjet decision error (allowing request):", decision.reason.message);
+      return next();
     }
 
     return next();
   } catch (error) {
-    console.error("Arcjet middleware error:", error);
-    return res.status(503).json({ error: "Security service unavailable" });
+    console.warn("Arcjet middleware error (allowing request):", error);
+    return next();
   }
 }

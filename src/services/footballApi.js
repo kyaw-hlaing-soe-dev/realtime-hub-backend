@@ -39,12 +39,12 @@ function getHeaders() {
 // ─── Core fetch helper ────────────────────────────────────────────────────────
 
 /**
- * Perform a GET request against the api-football v3 API.
+ * Perform a GET request against the api-football v3 API and validate errors.
  * @param {string} path   – e.g. "/fixtures"
  * @param {Record<string, string|number|boolean>} params – query string params
- * @returns {Promise<any[]>} the `response` array from the API
+ * @returns {Promise<any>} the `response` field from the API
  */
-async function get(path, params = {}) {
+async function requestResponse(path, params = {}) {
   const url = new URL(`${BASE_URL}${path}`);
 
   for (const [key, value] of Object.entries(params)) {
@@ -76,7 +76,17 @@ async function get(path, params = {}) {
     }
   }
 
-  return json.response ?? [];
+  return json.response;
+}
+
+/**
+ * Perform a GET request against the api-football v3 API.
+ * @param {string} path   – e.g. "/fixtures"
+ * @param {Record<string, string|number|boolean>} params – query string params
+ * @returns {Promise<any[]>} the `response` array from the API
+ */
+async function get(path, params = {}) {
+  return (await requestResponse(path, params)) ?? [];
 }
 
 // ─── Status ───────────────────────────────────────────────────────────────────
@@ -88,12 +98,7 @@ async function get(path, params = {}) {
  * @returns {{ account, subscription, requests }}
  */
 export async function fetchStatus() {
-  const res = await fetch(`${BASE_URL}/status`, {
-    method: "GET",
-    headers: getHeaders(),
-  });
-  const json = await res.json();
-  return json.response ?? null;
+  return (await requestResponse("/status")) ?? null;
 }
 
 // ─── Timezone ─────────────────────────────────────────────────────────────────

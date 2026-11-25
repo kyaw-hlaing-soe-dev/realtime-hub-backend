@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import http from "http";
 import matchesRouter from "./routes/matches.js";

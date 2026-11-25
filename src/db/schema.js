@@ -19,7 +19,7 @@ export const matches = pgTable(
   "matches",
   {
     id: serial("id").primaryKey(),
-    // External ID from the football API (e.g. api-football fixture id)
+    // Stable ID from an external fixture dataset, when available.
     externalId: text("external_id"),
     sport: text("sport").notNull(),
     homeTeam: text("home_team").notNull(),

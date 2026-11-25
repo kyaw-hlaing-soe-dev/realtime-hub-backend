@@ -69,6 +69,29 @@ HTTP:      http://localhost:8000
 WebSocket: ws://localhost:8000/ws
 ```
 
+### Today's fixtures
+
+Premier League fixtures come from the public
+[openfootball/football.json](https://github.com/openfootball/football.json)
+dataset. No API key is required. The WebSocket server publishes an initial
+snapshot when a client subscribes and sends updated snapshots when the source
+refreshes (once daily). WebSocket delivery is immediate; the upstream dataset
+does not provide live match events or score changes between refreshes.
+
+Connect to `/ws`, then send:
+
+```json
+{"type":"subscribeFixtures","league":39}
+```
+
+The server responds with `subscribedFixtures`, followed by a `fixturesSnapshot`
+message. Later updates arrive as `fixturesUpdated`. The HTTP fallback
+`GET /football/fixtures/today` returns the same day's fixture data.
+
+The dataset provides fixtures and final results, not live scores, match events,
+player statistics, or odds. This backend no longer includes the API-Sports
+proxy routes.
+
 Use `npm run dev` to start the server with Node.js watch mode.
 
 ## Vercel deployment
@@ -77,6 +100,13 @@ The HTTP API can be deployed to Vercel. Configure `DATABASE_URL` and
 `ARCJET_KEY` as Vercel environment variables before deploying. Vercel runs the
 HTTP API as a serverless function; WebSocket connections require a long-running
 Node.js host and are available when running the project locally.
+
+## Render deployment
+
+Use `npm install` as the build command and `npm start` as the start command.
+Configure `DATABASE_URL` and `ARCJET_KEY` in the service environment. The server
+binds to `0.0.0.0` and uses Render's `PORT` value. Keep `npm run dev` for local
+watch mode.
 
 ## Matches API
 

@@ -14,17 +14,20 @@
 
 const BASE_URL =
   process.env.FOOTBALL_API_BASE ?? "https://v3.football.api-sports.io";
-const API_KEY = process.env.FOOTBALL_API_KEY;
 
-if (!API_KEY) {
-  throw new Error("FOOTBALL_API_KEY environment variable is missing.");
-}
-
-// api-football.com direct subscription uses x-apisports-key
+// api-football.com direct subscription uses x-apisports-key.
 // IMPORTANT: Do NOT send extra headers — the API will reject the request.
-const DEFAULT_HEADERS = {
-  "x-apisports-key": API_KEY,
-};
+// Key is read lazily on each request so the server can boot without it set.
+function getHeaders() {
+  const key = process.env.FOOTBALL_API_KEY;
+  if (!key) {
+    throw new Error(
+      "FOOTBALL_API_KEY is not set. Add it to your .env file — " +
+        "get a free key at https://dashboard.api-football.com"
+    );
+  }
+  return { "x-apisports-key": key };
+}
 
 // ─── Core fetch helper ────────────────────────────────────────────────────────
 
@@ -45,7 +48,7 @@ async function get(path, params = {}) {
 
   const res = await fetch(url.toString(), {
     method: "GET",
-    headers: DEFAULT_HEADERS,
+    headers: getHeaders(),
   });
 
   if (!res.ok) {
@@ -80,7 +83,7 @@ async function get(path, params = {}) {
 export async function fetchAccountStatus() {
   const res = await fetch(`${BASE_URL}/status`, {
     method: "GET",
-    headers: DEFAULT_HEADERS,
+    headers: getHeaders(),
   });
   const json = await res.json();
   return json.response ?? null;

@@ -8,6 +8,13 @@
       "when": 1794802831672,
       "tag": "0000_sticky_gambit",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795590163657,
+      "tag": "0001_purple_white_tiger",
+      "breakpoints": true
     }
   ]
 }

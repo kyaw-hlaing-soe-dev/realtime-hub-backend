@@ -1,73 +1,116 @@
 /**
- * Football API Service — wraps api-football.com (RapidAPI) calls.
+ * Football API Service — wraps api-football.com (direct / API-Sports subscription).
+ *
+ * Docs:  https://www.api-football.com/documentation-v3
+ * Base:  https://v3.football.api-sports.io
+ * Auth:  x-apisports-key header (get your key from dashboard.api-football.com)
  *
  * Required env vars:
- *   FOOTBALL_API_KEY   – your api-football / RapidAPI key
- *   FOOTBALL_API_HOST  – defaults to "api-football-v1.p.rapidapi.com"
- *   FOOTBALL_API_BASE  – defaults to "https://api-football-v1.p.rapidapi.com/v3"
+ *   FOOTBALL_API_KEY   – your api-football key (from dashboard.api-football.com)
+ *
+ * Optional overrides (rarely needed):
+ *   FOOTBALL_API_BASE  – defaults to "https://v3.football.api-sports.io"
  */
 
 const BASE_URL =
-  process.env.FOOTBALL_API_BASE ?? "https://api-football-v1.p.rapidapi.com/v3";
-const HOST =
-  process.env.FOOTBALL_API_HOST ?? "api-football-v1.p.rapidapi.com";
+  process.env.FOOTBALL_API_BASE ?? "https://v3.football.api-sports.io";
 const API_KEY = process.env.FOOTBALL_API_KEY;
 
 if (!API_KEY) {
   throw new Error("FOOTBALL_API_KEY environment variable is missing.");
 }
 
+// api-football.com direct subscription uses x-apisports-key
+// IMPORTANT: Do NOT send extra headers — the API will reject the request.
 const DEFAULT_HEADERS = {
-  "x-rapidapi-key": API_KEY,
-  "x-rapidapi-host": HOST,
+  "x-apisports-key": API_KEY,
 };
 
+// ─── Core fetch helper ────────────────────────────────────────────────────────
+
 /**
- * Generic GET helper with error surfacing.
+ * Perform a GET request against the api-football v3 API.
  * @param {string} path   – e.g. "/fixtures"
- * @param {Record<string,string|number>} params – query params
+ * @param {Record<string, string|number>} params – query string params
+ * @returns {Promise<any[]>} the `response` array from the API
  */
 async function get(path, params = {}) {
   const url = new URL(`${BASE_URL}${path}`);
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
   }
 
-  const res = await fetch(url.toString(), { headers: DEFAULT_HEADERS });
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: DEFAULT_HEADERS,
+  });
 
   if (!res.ok) {
     throw new Error(
-      `Football API error: ${res.status} ${res.statusText} — ${url}`
+      `api-football error ${res.status} ${res.statusText} — ${url}`
     );
   }
 
   const json = await res.json();
 
-  if (json.errors && Object.keys(json.errors).length > 0) {
-    throw new Error(`Football API error: ${JSON.stringify(json.errors)}`);
+  // The API returns errors as an object with keys even on 200 responses
+  if (json.errors) {
+    const errorValues = Array.isArray(json.errors)
+      ? json.errors
+      : Object.values(json.errors);
+
+    if (errorValues.length > 0) {
+      throw new Error(`api-football error: ${errorValues.join(", ")}`);
+    }
   }
 
-  return json.response;
+  return json.response ?? [];
 }
 
-// ─── Fixtures ────────────────────────────────────────────────────────────────
+// ─── Account / Status ─────────────────────────────────────────────────────────
 
 /**
- * Fetch fixtures (matches) for a given date and optional league / season.
- * @param {Object} opts
- * @param {string} opts.date       – "YYYY-MM-DD"
- * @param {number} [opts.league]   – league id (e.g. 39 = Premier League)
- * @param {number} [opts.season]   – season year (e.g. 2024)
- * @param {string} [opts.status]   – "NS" | "1H" | "HT" | "2H" | "FT" | "LIVE"
- * @param {number} [opts.timezone] – IANA timezone string
+ * Check API quota / account status.
+ * Useful for health-check endpoint.
+ * @returns {{ account, subscription, requests }}
  */
-export async function fetchFixturesByDate({ date, league, season, status, timezone }) {
-  return get("/fixtures", { date, league, season, status, timezone });
+export async function fetchAccountStatus() {
+  const res = await fetch(`${BASE_URL}/status`, {
+    method: "GET",
+    headers: DEFAULT_HEADERS,
+  });
+  const json = await res.json();
+  return json.response ?? null;
+}
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch fixtures (matches) filtered by date and optional league / season.
+ *
+ * @param {Object} opts
+ * @param {string}  opts.date     – "YYYY-MM-DD"
+ * @param {number}  [opts.league] – league id (e.g. 39 = Premier League)
+ * @param {number}  [opts.season] – season year (e.g. 2024)
+ * @param {string}  [opts.status] – "NS" | "1H" | "HT" | "2H" | "FT" | "LIVE"
+ *
+ * Common status codes:
+ *   NS   = Not Started      1H  = First Half      HT = Half Time
+ *   2H   = Second Half      ET  = Extra Time      P  = Penalty in Progress
+ *   FT   = Full Time        AET = After Extra Time PEN = After Penalties
+ *   SUSP = Suspended        CANC = Cancelled      ABD = Abandoned
+ */
+export async function fetchFixturesByDate({ date, league, season, status }) {
+  return get("/fixtures", { date, league, season, status });
 }
 
 /**
- * Fetch a single fixture with full details (events, lineups, stats).
+ * Fetch a single fixture by its id (includes lineup, stats, events).
  * @param {number} fixtureId
+ * @returns {Object|null}
  */
 export async function fetchFixtureById(fixtureId) {
   const data = await get("/fixtures", { id: fixtureId });
@@ -75,145 +118,260 @@ export async function fetchFixtureById(fixtureId) {
 }
 
 /**
- * Fetch live fixtures (all currently in-play).
- * @param {number} [league] – optional league filter
+ * Fetch ALL currently live fixtures, optionally filtered by league.
+ *
+ * Uses the special `live=all` parameter.
+ * To filter by league: live=39-140  (comma-separated league ids)
+ *
+ * @param {number|number[]} [leagues] – single league id or array of ids
  */
-export async function fetchLiveFixtures(league) {
-  return get("/fixtures", { live: "all", ...(league ? { league } : {}) });
+export async function fetchLiveFixtures(leagues) {
+  const live = leagues
+    ? Array.isArray(leagues)
+      ? leagues.join("-")
+      : String(leagues)
+    : "all";
+
+  return get("/fixtures", { live });
 }
 
-// ─── Events (goal / card / substitution) ─────────────────────────────────────
+/**
+ * Fetch fixtures for a league + season (useful for seeding a full schedule).
+ * @param {number} league
+ * @param {number} season
+ * @param {string} [status] – optional status filter
+ */
+export async function fetchFixturesByLeague(league, season, status) {
+  return get("/fixtures", { league, season, status });
+}
+
+// ─── Events (goal / card / substitution / VAR) ────────────────────────────────
 
 /**
- * Fetch events for a fixture (goals, cards, subs).
- * @param {number} fixtureId
+ * Fetch all in-match events for a fixture.
+ *
+ * @param {number}  fixtureId
+ * @param {Object}  [filters]
+ * @param {number}  [filters.team]   – filter by team id
+ * @param {number}  [filters.player] – filter by player id
+ * @param {string}  [filters.type]   – "Goal" | "Card" | "subst" | "Var"
+ * @returns {Object[]}
  */
-export async function fetchFixtureEvents(fixtureId) {
-  return get("/fixtures/events", { fixture: fixtureId });
+export async function fetchFixtureEvents(fixtureId, filters = {}) {
+  return get("/fixtures/events", {
+    fixture: fixtureId,
+    ...filters,
+  });
 }
 
 // ─── Statistics ───────────────────────────────────────────────────────────────
 
 /**
- * Fetch team-level statistics for a fixture.
+ * Fetch team-level statistics for a fixture (possession, shots, passes …).
  * @param {number} fixtureId
+ * @param {number} [teamId] – optional: only fetch stats for one team
  */
-export async function fetchFixtureStatistics(fixtureId) {
-  return get("/fixtures/statistics", { fixture: fixtureId });
+export async function fetchFixtureStatistics(fixtureId, teamId) {
+  return get("/fixtures/statistics", {
+    fixture: fixtureId,
+    ...(teamId ? { team: teamId } : {}),
+  });
 }
 
-// ─── Mapper: API fixture → DB row ─────────────────────────────────────────────
+// ─── Leagues ─────────────────────────────────────────────────────────────────
 
 /**
- * Map an api-football fixture object to our DB `matches` shape.
- * @param {Object} fixture – raw api-football fixture response item
- * @returns {Object}
+ * Search leagues by name or country.
+ * @param {Object} [opts]
+ * @param {string} [opts.name]    – e.g. "Premier League"
+ * @param {string} [opts.country] – e.g. "England"
+ * @param {number} [opts.season]  – e.g. 2024
+ * @param {boolean}[opts.current] – true = only leagues with an ongoing season
+ */
+export async function fetchLeagues({ name, country, season, current } = {}) {
+  return get("/leagues", { name, country, season, current: current ? "true" : undefined });
+}
+
+// ─── Data mappers ─────────────────────────────────────────────────────────────
+
+/** Map api-football status short codes → our DB enum values */
+const STATUS_MAP = {
+  NS:   "scheduled",
+  "1H": "live",
+  HT:   "live",
+  "2H": "live",
+  ET:   "live",
+  BT:   "live",
+  P:    "live",
+  INT:  "live",
+  LIVE: "live",
+  FT:   "finished",
+  AET:  "finished",
+  PEN:  "finished",
+  SUSP: "scheduled",
+  CANC: "finished",
+  ABD:  "finished",
+  AWD:  "finished",
+  WO:   "finished",
+};
+
+/**
+ * Map a raw api-football fixture object → our DB `matches` row shape.
+ *
+ * @param {Object} fixture – one item from the fixtures `response` array
+ * @returns {Object}       – matches the matches table columns
  */
 export function mapFixtureToMatch(fixture) {
-  const { fixture: f, teams, goals, league } = fixture;
+  const { fixture: f, teams, goals, league, score } = fixture;
 
-  // api-football gives timestamps in Unix seconds
   const startTime = new Date(f.date);
-  // Approximate end: kickoff + 105 minutes (90 min + 15 min avg stoppage)
+  // Approximate end: kickoff + 105 min (90 min play + ~15 min added time)
   const endTime = new Date(startTime.getTime() + 105 * 60 * 1000);
-
-  const statusMap = {
-    NS: "scheduled",
-    "1H": "live",
-    HT: "live",
-    "2H": "live",
-    ET: "live",
-    P: "live",
-    FT: "finished",
-    AET: "finished",
-    PEN: "finished",
-    BT: "live",
-    SUSP: "scheduled",
-    INT: "live",
-    CANC: "finished",
-    ABD: "finished",
-    AWD: "finished",
-    WO: "finished",
-    LIVE: "live",
-  };
 
   return {
     externalId: String(f.id),
     sport: "football",
     homeTeam: teams.home.name,
     awayTeam: teams.away.name,
-    status: statusMap[f.status.short] ?? "scheduled",
+    status: STATUS_MAP[f.status.short] ?? "scheduled",
     startTime,
     endTime,
-    homeScore: goals.home ?? 0,
-    awayScore: goals.away ?? 0,
+    homeScore: goals?.home ?? 0,
+    awayScore: goals?.away ?? 0,
     metadata: {
       leagueId: league.id,
       leagueName: league.name,
       leagueCountry: league.country,
+      leagueLogo: league.logo,
+      leagueSeason: league.season,
       round: league.round,
-      venueId: f.venue?.id,
-      venueName: f.venue?.name,
-      referee: f.referee,
+      venueId: f.venue?.id ?? null,
+      venueName: f.venue?.name ?? null,
+      venueCity: f.venue?.city ?? null,
+      referee: f.referee ?? null,
+      homeLogo: teams.home.logo,
+      awayLogo: teams.away.logo,
+      homeTeamId: teams.home.id,
+      awayTeamId: teams.away.id,
       apiStatus: f.status.short,
-      elapsed: f.status.elapsed,
+      apiStatusLong: f.status.long,
+      elapsed: f.status.elapsed ?? null,
+      // Halftime / fulltime scores if available
+      halftimeHome: score?.halftime?.home ?? null,
+      halftimeAway: score?.halftime?.away ?? null,
+      fulltimeHome: score?.fulltime?.home ?? null,
+      fulltimeAway: score?.fulltime?.away ?? null,
     },
   };
 }
 
 /**
- * Map a fixture event to our DB `commentary` shape.
- * @param {number} matchId     – our internal match id
- * @param {Object} event       – raw api-football event item
- * @param {number} sequence    – monotonic sequence number
+ * Map a raw api-football event → our DB `commentary` row shape.
+ *
+ * @param {number} matchId   – our internal DB match id
+ * @param {Object} event     – one item from the fixtures/events `response` array
+ * @param {number} sequence  – monotonic index (0-based, position in event list)
+ * @returns {Object}         – matches the commentary table columns
  */
 export function mapEventToCommentary(matchId, event, sequence) {
-  const typeMap = {
-    Goal: "goal",
-    Card: "card",
+  const EVENT_TYPE_MAP = {
+    Goal:  "goal",
+    Card:  "card",
     subst: "substitution",
-    Var: "var",
+    Var:   "var",
   };
+
+  const elapsed = event.time?.elapsed ?? null;
+  const extra = event.time?.extra ?? null;
+
+  // Determine period from elapsed time
+  let period = null;
+  if (elapsed !== null) {
+    if (elapsed <= 45 || (elapsed === 45 && extra)) period = "1H";
+    else if (elapsed <= 90 || (elapsed === 90 && extra)) period = "2H";
+    else period = "ET";
+  }
 
   return {
     matchId,
-    minute: event.time?.elapsed ?? null,
+    minute: elapsed,
     sequence,
-    period: event.time?.elapsed <= 45 ? "1H" : "2H",
-    eventType: typeMap[event.type] ?? event.type?.toLowerCase() ?? "event",
+    period,
+    eventType: EVENT_TYPE_MAP[event.type] ?? event.type?.toLowerCase() ?? "event",
     actor: event.player?.name ?? null,
     team: event.team?.name ?? null,
     message: buildEventMessage(event),
     metadata: {
-      assistPlayer: event.assist?.name ?? null,
-      detail: event.detail,
-      comments: event.comments,
-      teamId: event.team?.id,
-      playerId: event.player?.id,
+      playerId: event.player?.id ?? null,
+      assistPlayerId: event.assist?.id ?? null,
+      assistPlayerName: event.assist?.name ?? null,
+      teamId: event.team?.id ?? null,
+      detail: event.detail ?? null,
+      comments: event.comments ?? null,
+      extra: extra,
     },
-    tags: [event.type?.toLowerCase(), event.detail?.toLowerCase()].filter(Boolean),
+    tags: [
+      event.type?.toLowerCase(),
+      event.detail?.toLowerCase().replace(/\s+/g, "_"),
+    ].filter(Boolean),
   };
 }
 
+// ─── Message builder ──────────────────────────────────────────────────────────
+
 function buildEventMessage(event) {
   const { type, detail, player, assist, team, time } = event;
-  const min = time?.elapsed ? `${time.elapsed}'` : "";
-  const name = player?.name ?? "Unknown";
+
+  const elapsed = time?.elapsed ?? null;
+  const extra = time?.extra;
+  const minStr = elapsed !== null
+    ? extra
+      ? `${elapsed}+${extra}'`
+      : `${elapsed}'`
+    : "";
+
+  const playerName = player?.name ?? "Unknown";
+  const teamName = team?.name ?? "";
 
   switch (type) {
-    case "Goal":
-      return assist?.name
-        ? `⚽ ${min} GOAL! ${name} scores for ${team?.name} (assist: ${assist.name})`
-        : `⚽ ${min} GOAL! ${name} scores for ${team?.name}`;
-    case "Card":
-      return detail === "Yellow Card"
-        ? `🟨 ${min} Yellow card for ${name} (${team?.name})`
-        : `🟥 ${min} Red card for ${name} (${team?.name})`;
-    case "subst":
-      return `🔄 ${min} Substitution — ${team?.name}: ${name} replaces ${assist?.name ?? "?"}`;
-    case "Var":
-      return `📺 ${min} VAR: ${detail} — ${name}`;
+    case "Goal": {
+      if (detail === "Own Goal") {
+        return `⚽ ${minStr} OWN GOAL by ${playerName} (${teamName})`;
+      }
+      if (detail === "Penalty") {
+        return `⚽ ${minStr} PENALTY GOAL! ${playerName} scores for ${teamName}`;
+      }
+      if (detail === "Missed Penalty") {
+        return `❌ ${minStr} Penalty MISSED by ${playerName} (${teamName})`;
+      }
+      const assistStr = assist?.name ? ` (assist: ${assist.name})` : "";
+      return `⚽ ${minStr} GOAL! ${playerName} scores for ${teamName}${assistStr}`;
+    }
+
+    case "Card": {
+      if (detail === "Yellow Card") {
+        return `🟨 ${minStr} Yellow card — ${playerName} (${teamName})`;
+      }
+      if (detail === "Red Card") {
+        return `🟥 ${minStr} Red card — ${playerName} (${teamName})`;
+      }
+      if (detail === "Yellow-Red") {
+        return `🟥 ${minStr} Second yellow / red card — ${playerName} (${teamName})`;
+      }
+      return `🟨 ${minStr} Card (${detail}) — ${playerName} (${teamName})`;
+    }
+
+    case "subst": {
+      const off = playerName;
+      const on = assist?.name ?? "?";
+      return `🔄 ${minStr} Substitution — ${teamName}: ${on} replaces ${off}`;
+    }
+
+    case "Var": {
+      return `📺 ${minStr} VAR: ${detail ?? "review"} — ${playerName} (${teamName})`;
+    }
+
     default:
-      return `${min} ${type}: ${detail ?? ""} — ${name}`;
+      return `${minStr} ${type}: ${detail ?? ""} — ${playerName} (${teamName})`.trim();
   }
 }
